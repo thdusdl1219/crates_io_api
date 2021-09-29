@@ -201,6 +201,45 @@ impl Client {
         .await
     }
 
+        pub async fn crate_reverse_dependencies_by_page(
+        &self,
+        name: &str,
+        page: u64,
+    ) -> Result<ReverseDependencies, Error> {
+        fn fetch_page(
+            c: Client,
+            name: String,
+            mut tidy_rdeps: ReverseDependencies,
+            page: u64,
+        ) -> BoxFuture<'static, Result<ReverseDependencies, Error>> {
+            let url = c
+                .base_url
+                .join(&format!(
+                    "crates/{0}/reverse_dependencies?per_page=100&page={1}",
+                    name, page
+                ))
+                .unwrap();
+
+            async move {
+                let rdeps = c.get::<ReverseDependenciesAsReceived>(&url).await?;
+                tidy_rdeps.from_received(&rdeps);
+                Ok(tidy_rdeps)
+            }
+            .boxed()
+        }
+
+        fetch_page(
+            self.clone(),
+            name.to_string(),
+            ReverseDependencies {
+                dependencies: Vec::new(),
+                meta: Meta { total: 0 },
+            },
+            page,
+        )
+        .await
+    }
+
     /// Retrieve the authors for a crate version.
     pub async fn crate_authors(&self, name: &str, version: &str) -> Result<Authors, Error> {
         let url = self
