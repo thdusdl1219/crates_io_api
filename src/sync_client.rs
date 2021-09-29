@@ -118,7 +118,11 @@ impl SyncClient {
     /// Note: Since the reverse dependency endpoint requires pagination, this
     /// will result in multiple requests if the crate has more than 100 reverse
     /// dependencies.
-    pub fn crate_reverse_dependencies(&self, name: &str) -> Result<ReverseDependencies, Error> {
+    pub fn crate_reverse_dependencies(
+        &self,
+        name: &str,
+        until: Option<u64>,
+    ) -> Result<ReverseDependencies, Error> {
         let mut page = 1;
         let mut rdeps: ReverseDependenciesAsReceived;
         let mut tidy_rdeps = ReverseDependencies {
@@ -136,6 +140,12 @@ impl SyncClient {
 
             tidy_rdeps.from_received(&rdeps);
 
+            if let Some(until) = until {
+                if page >= until {
+                    break;
+                }
+            }
+
             if !rdeps.dependencies.is_empty() {
                 tidy_rdeps.meta = rdeps.meta;
                 page += 1;
@@ -143,6 +153,29 @@ impl SyncClient {
                 break;
             }
         }
+        Ok(tidy_rdeps)
+    }
+
+    pub fn crate_reverse_dependencies_by_page(
+        &self,
+        name: &str,
+        page: u64,
+    ) -> Result<ReverseDependencies, Error> {
+        let rdeps: ReverseDependenciesAsReceived;
+        let mut tidy_rdeps = ReverseDependencies {
+            dependencies: Vec::new(),
+            meta: Meta { total: 0 },
+        };
+
+        let url = self.base_url.join(&format!(
+            "crates/{}/reverse_dependencies?per_page=100&page={}",
+            name, page
+        ))?;
+
+        rdeps = self.get(url)?;
+
+        tidy_rdeps.from_received(&rdeps);
+
         Ok(tidy_rdeps)
     }
 
@@ -206,7 +239,7 @@ impl SyncClient {
 
         let dls = self.crate_downloads(name)?;
         let owners = self.crate_owners(name)?;
-        let reverse_dependencies = self.crate_reverse_dependencies(name)?;
+        let reverse_dependencies = self.crate_reverse_dependencies(name, None)?;
 
         let versions = if resp.versions.is_empty() {
             vec![]
