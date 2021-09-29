@@ -143,12 +143,14 @@ impl Client {
     pub async fn crate_reverse_dependencies(
         &self,
         name: &str,
+        page: Option<u64>,
     ) -> Result<ReverseDependencies, Error> {
         fn fetch_page(
             c: Client,
             name: String,
             mut tidy_rdeps: ReverseDependencies,
             page: u64,
+            until: Option<u64>,
         ) -> BoxFuture<'static, Result<ReverseDependencies, Error>> {
             let url = c
                 .base_url
@@ -162,12 +164,26 @@ impl Client {
                 let rdeps = c.get::<ReverseDependenciesAsReceived>(&url).await?;
                 tidy_rdeps.from_received(&rdeps);
 
-                if !rdeps.dependencies.is_empty() {
-                    tidy_rdeps.meta = rdeps.meta;
-                    fetch_page(c, name, tidy_rdeps, page + 1).await
+                if let Some(until) = until {
+                    if page >= until {
+                        Ok(tidy_rdeps)
+                    } else {
+                        if !rdeps.dependencies.is_empty() {
+                            tidy_rdeps.meta = rdeps.meta;
+                            fetch_page(c, name, tidy_rdeps, page + 1, Some(until)).await
+                        } else {
+                            Ok(tidy_rdeps)
+                        }
+                    }
                 } else {
-                    Ok(tidy_rdeps)
+                    if !rdeps.dependencies.is_empty() {
+                        tidy_rdeps.meta = rdeps.meta;
+                        fetch_page(c, name, tidy_rdeps, page + 1, until).await
+                    } else {
+                        Ok(tidy_rdeps)
+                    }
                 }
+
             }
             .boxed()
         }
@@ -180,6 +196,7 @@ impl Client {
                 meta: Meta { total: 0 },
             },
             1,
+            page,
         )
         .await
     }
@@ -267,7 +284,7 @@ impl Client {
             }?;
             let dls_fut = c.crate_downloads(&name);
             let owners_fut = c.crate_owners(&name);
-            let reverse_dependencies_fut = c.crate_reverse_dependencies(&name);
+            let reverse_dependencies_fut = c.crate_reverse_dependencies(&name, None);
             try_join!(dls_fut, owners_fut, reverse_dependencies_fut).map(
                 |(dls, owners, reverse_dependencies)| {
                     let data = krate.crate_data;
